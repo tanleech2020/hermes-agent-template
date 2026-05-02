@@ -22,7 +22,17 @@ ARG HERMES_REF=v2026.4.30
 # Node.js is required only at build time to compile the Hermes React dashboard.
 # We strip the source + apt lists afterwards to keep the image lean.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl ca-certificates git tini && \
+    apt-get install -y --no-install-recommends \
+    curl ca-certificates git tini \
+    # Playwright system dependencies
+    libglib2.0-0 libx11-6 libxext6 libxdamage1 libxcomposite1 \
+    libxrandr2 libxcursor1 libxi6 libxtst6 libxss1 libxkbcommon0 \
+    libpango-1.0-0 libpangocairo-1.0-0 libatk1.0-0 libcairo2 \
+    libgdk-pixbuf-2.0-0 libgconf-2-4 libappindicator1 libnss3 \
+    libnspr4 libxinerama1 libxext6 libxfixes3 libxrender1 \
+    fonts-liberation libappindicator3-1 libasound2 libatk-bridge2.0-0 \
+    libatspi2.0-0 libcups2 libdbus-1-3 libdrm2 libgbm1 libgtk-3-0 \
+    libxkbcommon-x11-0 && \
     curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y --no-install-recommends nodejs && \
     rm -rf /var/lib/apt/lists/*
