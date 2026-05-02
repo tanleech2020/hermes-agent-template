@@ -138,6 +138,53 @@ CHANNEL_MAP  = {
     "Matrix":      "MATRIX_ACCESS_TOKEN",
 }
 
+# Create /data directory if it doesn't exist
+DATA_DIR = Path("/data/workspace")
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+@app.post("/api/upload")
+async def upload_file(file: UploadFile = File(...)):
+    """Upload a file to /data"""
+    try:
+        file_path = DATA_DIR+"/input" / file.filename
+        
+        # Save uploaded file
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        return {
+            "message": "File uploaded successfully",
+            "filename": file.filename,
+            "path": str(file_path)
+        }
+    except Exception as e:
+        return {"error": str(e)}, 400
+
+@app.get("/api/download/{file_name}")
+async def download_file(file_name: str):
+    """Download a file from /data"""
+    file_path = DATA_DIR+"/output" / file_name
+    
+    if not file_path.exists():
+        return {"error": "File not found"}, 404
+    
+    if not file_path.is_file():
+        return {"error": "Not a file"}, 400
+    
+    return FileResponse(
+        path=file_path,
+        filename=file_name,
+        media_type="application/octet-stream"
+    )
+
+@app.get("/api/files")
+async def list_files():
+    """List all files in /data"""
+    try:
+        files = [f.name for f in DATA_DIR.iterdir() if f.is_file()]
+        return {"files": files}
+    except Exception as e:
+        return {"error": str(e)}, 400
 
 # ── .env helpers ──────────────────────────────────────────────────────────────
 def read_env(path: Path) -> dict[str, str]:
