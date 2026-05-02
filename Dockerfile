@@ -59,6 +59,9 @@ RUN git clone --depth 1 --branch ${HERMES_REF} https://github.com/NousResearch/h
 COPY requirements.txt /app/requirements.txt
 RUN uv pip install --system --no-cache -r /app/requirements.txt
 
+# Install Playwright browser binaries for web automation
+RUN playwright install chromium firefox webkit
+
 RUN mkdir -p /data/.hermes
 
 COPY server.py /app/server.py
