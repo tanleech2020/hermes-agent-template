@@ -26,6 +26,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import signal
 import time
 from collections import deque
@@ -38,6 +39,7 @@ import websockets.exceptions
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import (
+    FileResponse,
     HTMLResponse,
     JSONResponse,
     RedirectResponse,
@@ -138,53 +140,13 @@ CHANNEL_MAP  = {
     "Matrix":      "MATRIX_ACCESS_TOKEN",
 }
 
-# Create /data directory if it doesn't exist
+# Create /data directory structure if it doesn't exist
 DATA_DIR = Path("/data/workspace")
+INPUT_DIR = DATA_DIR / "input"
+OUTPUT_DIR = DATA_DIR / "output"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-@app.post("/api/upload")
-async def upload_file(file: UploadFile = File(...)):
-    """Upload a file to /data"""
-    try:
-        file_path = DATA_DIR+"/input" / file.filename
-        
-        # Save uploaded file
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-        
-        return {
-            "message": "File uploaded successfully",
-            "filename": file.filename,
-            "path": str(file_path)
-        }
-    except Exception as e:
-        return {"error": str(e)}, 400
-
-@app.get("/api/download/{file_name}")
-async def download_file(file_name: str):
-    """Download a file from /data"""
-    file_path = DATA_DIR+"/output" / file_name
-    
-    if not file_path.exists():
-        return {"error": "File not found"}, 404
-    
-    if not file_path.is_file():
-        return {"error": "Not a file"}, 400
-    
-    return FileResponse(
-        path=file_path,
-        filename=file_name,
-        media_type="application/octet-stream"
-    )
-
-@app.get("/api/files")
-async def list_files():
-    """List all files in /data"""
-    try:
-        files = [f.name for f in DATA_DIR.iterdir() if f.is_file()]
-        return {"files": files}
-    except Exception as e:
-        return {"error": str(e)}, 400
+INPUT_DIR.mkdir(parents=True, exist_ok=True)
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # ── .env helpers ──────────────────────────────────────────────────────────────
 def read_env(path: Path) -> dict[str, str]:
@@ -625,6 +587,54 @@ def get_http_client() -> httpx.AsyncClient:
             follow_redirects=False,
         )
     return _http_client
+
+
+# ── File upload/download handlers ────────────────────────────────────────────
+async def upload_file(request: Request) -> Response:
+    """POST /api/upload — upload a file to the input workspace directory."""
+    if err := guard(request): return err
+    try:
+        form = await request.form()
+        upload = form.get("file")
+        if upload is None or not hasattr(upload, "filename"):
+            return JSONResponse({"error": "No file provided"}, status_code=400)
+        filename = upload.filename or "upload"
+        file_path = INPUT_DIR / filename
+        with file_path.open("wb") as buf:
+            shutil.copyfileobj(upload.file, buf)
+        return JSONResponse({
+            "message": "File uploaded successfully",
+            "filename": filename,
+            "path": str(file_path),
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
+async def download_file(request: Request) -> Response:
+    """GET /api/download/{file_name} — download a file from the output directory."""
+    if err := guard(request): return err
+    file_name = request.path_params["file_name"]
+    file_path = OUTPUT_DIR / file_name
+    if not file_path.exists():
+        return JSONResponse({"error": "File not found"}, status_code=404)
+    if not file_path.is_file():
+        return JSONResponse({"error": "Not a file"}, status_code=400)
+    return FileResponse(
+        path=str(file_path),
+        filename=file_name,
+        media_type="application/octet-stream",
+    )
+
+
+async def list_files(request: Request) -> Response:
+    """GET /api/files — list all files in the workspace directory."""
+    if err := guard(request): return err
+    try:
+        files = [f.name for f in DATA_DIR.rglob("*") if f.is_file()]
+        return JSONResponse({"files": files})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
 
 
 # ── Route handlers ────────────────────────────────────────────────────────────
@@ -1140,6 +1150,11 @@ routes = [
 
     # /setup/* typos return a real 404 — not a silent proxy fallthrough.
     Route("/setup/{path:path}",                 route_setup_404,     methods=ANY_METHOD),
+
+    # File workspace API (cookie-auth guarded).
+    Route("/api/upload",                        upload_file,         methods=["POST"]),
+    Route("/api/download/{file_name:path}",     download_file,       methods=["GET"]),
+    Route("/api/files",                         list_files,          methods=["GET"]),
 
     # Reverse-proxy hermes's dashboard WebSockets (Chat tab + sidecar).
     # WebSocketRoute is matched independently of HTTP routes, so order
